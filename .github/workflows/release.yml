@@ -1,0 +1,53 @@
+name: Release
+
+# Manual, on-demand release: pick a tag from the Actions tab (or `gh workflow
+# run release.yml -f version=vX.Y.Z`) and this builds + publishes binaries.
+#
+# Windows is intentionally not built here: go-fuse (this project's FUSE
+# binding) only supports Linux and macOS. A Windows build would need a
+# different library (e.g. cgofuse + WinFsp) and isn't a drop-in addition.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to create (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: GOOS=linux go vet ./...
+
+      - name: Build binaries
+        run: |
+          set -eu
+          mkdir -p dist
+          build() {
+            echo "Building $1/$2"
+            GOOS="$1" GOARCH="$2" go build -o "dist/gdunion-$1-$2" ./cmd/gdunion
+          }
+          build linux amd64
+          build linux arm64
+          build darwin amd64
+          build darwin arm64
+
+      - name: Create release and upload binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.version }}" dist/* \
+            --title "${{ inputs.version }}" \
+            --generate-notes
