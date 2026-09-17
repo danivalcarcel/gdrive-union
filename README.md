@@ -12,7 +12,7 @@ files/folders. New files are placed automatically on whichever account has
 the most free space among those present in that folder.
 
 gdunion never touches your existing Drive content: each account is scoped
-to its own dedicated `gdrive-<account-name>` folder (created automatically
+to its own dedicated `gdrive-union-<account-name>` folder (created automatically
 if it doesn't exist yet). Everything gdunion reads, merges or writes lives
 inside that one folder per account; the rest of that Drive is left alone.
 
@@ -61,13 +61,14 @@ Each one opens (or prints) a Google URL to sign in with that account and
 authorize full (read/write) access to Drive. The token is saved to
 `~/.config/gdunion/accounts/<name>.json` and refreshes itself. Right after
 authorizing, gdunion also creates (or reuses) that account's dedicated
-`gdrive-<name>` folder and confirms it in the output.
+`gdrive-union-<name>` folder and confirms it in the output.
 
-If you had already used an earlier version of gdunion that mounted the
-whole Drive root, any files you created back then are still sitting at that
-account's actual root, outside the new `gdrive-<name>` folder - move them
-in manually (via the Drive web UI, or `mv` once mounted, since the folder
-is just a regular Drive folder) if you want them included.
+If you had already used an earlier version of gdunion (one that mounted the
+whole Drive root, or used a different app-folder prefix like `gdrive-<name>`),
+any files from back then are sitting outside the current
+`gdrive-union-<name>` folder - move them in manually (via the Drive web UI,
+or `mv` once mounted, since it's just a regular Drive folder) if you want
+them included.
 
 If you authorized an account with an older, read-only version of gdunion,
 you need to re-run `auth add <name>` for that account: Google won't widen

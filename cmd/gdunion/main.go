@@ -209,7 +209,7 @@ func loadAccount(ctx context.Context, cfg *oauth2.Config, name string) (*gdrive.
 // within each account, so mounting never exposes (or writes among) a
 // user's pre-existing, unrelated Drive content.
 func appFolderName(accountName string) string {
-	return "gdrive-" + accountName
+	return "gdrive-union-" + accountName
 }
 
 func humanBytes(n int64) string {

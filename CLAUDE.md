@@ -53,7 +53,7 @@ Four packages, each with a single responsibility, composed in
   `github.com/hanwen/go-fuse/v2/fs`. `NewRoot(sources []Source)` builds the
   tree root directly from caller-supplied sources; it does not know about
   "Drive root" at all - `cmd/gdunion/main.go` resolves each account's
-  dedicated `gdrive-<account-name>` app folder via `EnsureFolder` first
+  dedicated `gdrive-union-<account-name>` app folder via `EnsureFolder` first
   (mount never touches a user's pre-existing Drive content). This is where
   most of the interesting logic lives:
   - `node.go`: `DirNode` is a virtual directory backed by `[]Source`
