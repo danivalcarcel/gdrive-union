@@ -83,6 +83,16 @@ func authCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("Account %q authorized successfully.\n", name)
+
+		acc, err := loadAccount(ctx, cfg, name)
+		if err != nil {
+			return fmt.Errorf("preparing app folder: %w", err)
+		}
+		folder, err := acc.EnsureFolder(ctx, "root", appFolderName(name))
+		if err != nil {
+			return fmt.Errorf("preparing app folder: %w", err)
+		}
+		fmt.Printf("gdunion will only use the %q folder in this account's Drive.\n", folder.Name)
 		return nil
 
 	case "list":
@@ -142,16 +152,20 @@ func mountCmd(args []string) error {
 		return err
 	}
 
-	accounts := make([]*gdrive.Account, 0, len(names))
+	sources := make([]unionfs.Source, 0, len(names))
 	for _, name := range names {
 		acc, err := loadAccount(ctx, cfg, name)
 		if err != nil {
 			return fmt.Errorf("loading account %s: %w", name, err)
 		}
-		accounts = append(accounts, acc)
+		folder, err := acc.EnsureFolder(ctx, "root", appFolderName(name))
+		if err != nil {
+			return fmt.Errorf("preparing app folder for %s: %w", name, err)
+		}
+		sources = append(sources, unionfs.Source{Account: acc, FileID: folder.ID})
 	}
 
-	root := unionfs.NewRoot(accounts)
+	root := unionfs.NewRoot(sources)
 	server, err := gofuse.Mount(mountPoint, root, &gofuse.Options{
 		MountOptions: fuse.MountOptions{
 			FsName:     "gdunion",
@@ -163,7 +177,7 @@ func mountCmd(args []string) error {
 		return fmt.Errorf("mounting at %s: %w", mountPoint, err)
 	}
 
-	fmt.Printf("Mounted at %s with %d account(s): %v\n", mountPoint, len(accounts), names)
+	fmt.Printf("Mounted at %s with %d account(s): %v\n", mountPoint, len(sources), names)
 	fmt.Println("Ctrl+C to unmount.")
 
 	sigCh := make(chan os.Signal, 1)
@@ -189,6 +203,13 @@ func loadAccount(ctx context.Context, cfg *oauth2.Config, name string) (*gdrive.
 		return nil, err
 	}
 	return gdrive.NewAccount(ctx, name, ts)
+}
+
+// appFolderName is the dedicated Drive folder gdunion confines itself to
+// within each account, so mounting never exposes (or writes among) a
+// user's pre-existing, unrelated Drive content.
+func appFolderName(accountName string) string {
+	return "gdrive-" + accountName
 }
 
 func humanBytes(n int64) string {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -240,6 +241,22 @@ func (a *Account) Trash(ctx context.Context, id string) error {
 		return fmt.Errorf("%s: trashing %s: %w", a.Name, id, err)
 	}
 	return nil
+}
+
+// EnsureFolder finds a folder named `name` directly under parentID,
+// creating it if it doesn't exist yet. Used to scope gdunion to one
+// dedicated app folder per account instead of the account's entire Drive.
+func (a *Account) EnsureFolder(ctx context.Context, parentID, name string) (Entry, error) {
+	escaped := strings.ReplaceAll(name, `'`, `\'`)
+	q := fmt.Sprintf("name = '%s' and '%s' in parents and mimeType = '%s' and trashed = false", escaped, parentID, FolderMimeType)
+	res, err := a.Service.Files.List().Q(q).Fields("files(id, name, mimeType, size, modifiedTime)").PageSize(1).Context(ctx).Do()
+	if err != nil {
+		return Entry{}, fmt.Errorf("%s: looking up folder %q: %w", a.Name, name, err)
+	}
+	if len(res.Files) > 0 {
+		return entryFromFile(res.Files[0]), nil
+	}
+	return a.CreateFolder(ctx, parentID, name)
 }
 
 func entryFromFile(f *drive.File) Entry {

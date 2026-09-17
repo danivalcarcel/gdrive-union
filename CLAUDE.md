@@ -38,7 +38,8 @@ Four packages, each with a single responsibility, composed in
 - **`internal/gdrive`** - thin wrapper around the Drive v3 API for one
   authenticated account (`Account`). Knows nothing about other accounts or
   the union tree: list children, download/export content, create/update/
-  move/trash files, and a 60s-cached `FreeSpace()` used for write placement.
+  move/trash files, a 60s-cached `FreeSpace()` used for write placement, and
+  `EnsureFolder` (find-or-create a folder by name under a parent).
 - **`internal/auth`** - the OAuth2 flow per account. `AddAccount` runs a
   loopback HTTP server (fixed port by default, `--port` flag, so it can be
   reached through an `ssh -L` tunnel when the browser isn't on the same
@@ -49,8 +50,12 @@ Four packages, each with a single responsibility, composed in
   the shared `client_secret.json` (one OAuth client for every account) and
   `accounts/<name>.json` per-account tokens.
 - **`internal/unionfs`** - the actual filesystem, built on
-  `github.com/hanwen/go-fuse/v2/fs`. This is where most of the interesting
-  logic lives:
+  `github.com/hanwen/go-fuse/v2/fs`. `NewRoot(sources []Source)` builds the
+  tree root directly from caller-supplied sources; it does not know about
+  "Drive root" at all - `cmd/gdunion/main.go` resolves each account's
+  dedicated `gdrive-<account-name>` app folder via `EnsureFolder` first
+  (mount never touches a user's pre-existing Drive content). This is where
+  most of the interesting logic lives:
   - `node.go`: `DirNode` is a virtual directory backed by `[]Source`
     (account + Drive folder ID pairs) - more than one when folders from
     different accounts share a name and get merged. `refresh()` lists every

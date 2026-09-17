@@ -78,13 +78,12 @@ var (
 	_ fs.NodeRenamer   = (*DirNode)(nil)
 )
 
-// NewRoot builds the tree root, one virtual directory merging every
-// account's Drive root.
-func NewRoot(accounts []*gdrive.Account) *DirNode {
-	sources := make([]Source, len(accounts))
-	for i, a := range accounts {
-		sources[i] = Source{Account: a, FileID: "root"}
-	}
+// NewRoot builds the tree root, one virtual directory merging the given
+// per-account folders (typically each account's dedicated app folder,
+// resolved by the caller - see gdrive.Account.EnsureFolder - rather than
+// that account's actual Drive root, so gdunion doesn't expose or write
+// among a user's pre-existing, unrelated Drive content).
+func NewRoot(sources []Source) *DirNode {
 	return &DirNode{sources: sources}
 }
 
