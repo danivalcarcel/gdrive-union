@@ -18,12 +18,14 @@ inside that one folder per account; the rest of that Drive is left alone.
 
 ## Requirements
 
-- Go 1.22+.
-- Linux (or WSL2 with FUSE support) with `libfuse3` installed:
+- Linux or macOS (or WSL2 with FUSE support on Windows) with `libfuse3`
+  installed:
   ```bash
   sudo apt install fuse3
   ```
 - A Google Cloud account to create OAuth credentials (free).
+- Go 1.22+, only if building from source instead of using the install
+  script below.
 
 ## 1. Create OAuth credentials (one time)
 
@@ -42,7 +44,21 @@ inside that one folder per account; the rest of that Drive is left alone.
 These credentials are reused for every account you add afterwards; each
 account only contributes its own login/token.
 
-## 2. Build
+## 2. Install
+
+Quickest way, downloads the right prebuilt binary (Linux/macOS,
+amd64/arm64) from the [latest release](https://github.com/danivalcarcel/gdrive-union/releases/latest)
+into `/usr/local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/danivalcarcel/gdrive-union/master/install.sh | bash
+```
+
+Pass a specific release tag as an argument to pin a version instead of
+latest: `... | bash -s v0.1.0`. Set `GDUNION_INSTALL_DIR` to install
+somewhere other than `/usr/local/bin`.
+
+Or build from source:
 
 ```bash
 go mod tidy   # fetches dependencies (needs network)
@@ -52,9 +68,9 @@ go build -o gdunion ./cmd/gdunion
 ## 3. Add accounts
 
 ```bash
-./gdunion auth add personal
-./gdunion auth add work
-./gdunion auth add another-account
+gdunion auth add personal
+gdunion auth add work
+gdunion auth add another-account
 ```
 
 Each one opens (or prints) a Google URL to sign in with that account and
@@ -87,14 +103,14 @@ and run `gdunion auth add <name>` inside that same SSH session.
 Check available quota for each account:
 
 ```bash
-./gdunion auth list
+gdunion auth list
 ```
 
 ## 4. Mount
 
 ```bash
 mkdir -p ~/gdrive
-./gdunion mount ~/gdrive
+gdunion mount ~/gdrive
 ```
 
 Ctrl+C unmounts cleanly. If the process dies without unmounting, free the
