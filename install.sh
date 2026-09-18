@@ -4,10 +4,10 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/danivalcarcel/gdrive-union/master/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/danivalcarcel/gdrive-union/master/install.sh | bash -s v0.1.0
+#   curl -fsSL https://raw.githubusercontent.com/danivalcarcel/gdrive-union/master/install.sh | bash -s v0.2.0
 #
 #   ./install.sh            # installs the latest release
-#   ./install.sh v0.1.0     # installs a specific release tag
+#   ./install.sh v0.2.0     # installs a specific release tag
 #
 # Env vars:
 #   GDUNION_INSTALL_DIR   where to put the binary (default: /usr/local/bin)

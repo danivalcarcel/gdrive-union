@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/danivalcarcel/gdrive-union/master/i
 ```
 
 Pass a specific release tag as an argument to pin a version instead of
-latest: `... | bash -s v0.1.0`. Set `GDUNION_INSTALL_DIR` to install
+latest: `... | bash -s v0.2.0`. Set `GDUNION_INSTALL_DIR` to install
 somewhere other than `/usr/local/bin`.
 
 Or build from source:

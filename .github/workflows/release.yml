@@ -12,6 +12,9 @@ on:
       version:
         description: "Release tag to create (e.g. v0.2.0)"
         required: true
+      notes:
+        description: "Release description (Markdown). Leave blank to auto-generate from commits instead."
+        required: false
 
 permissions:
   contents: write
@@ -31,6 +34,9 @@ jobs:
       - name: Vet
         run: GOOS=linux go vet ./...
 
+      - name: Test
+        run: go test ./...
+
       - name: Build binaries
         run: |
           set -eu
@@ -47,7 +53,12 @@ jobs:
       - name: Create release and upload binaries
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
         run: |
-          gh release create "${{ inputs.version }}" dist/* \
-            --title "${{ inputs.version }}" \
-            --generate-notes
+          set -eu
+          if [ -n "$NOTES" ]; then
+            gh release create "$VERSION" dist/* --title "$VERSION" --notes "$NOTES"
+          else
+            gh release create "$VERSION" dist/* --title "$VERSION" --generate-notes
+          fi
