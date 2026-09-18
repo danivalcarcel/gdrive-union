@@ -14,6 +14,8 @@ import (
 	"golang.org/x/oauth2"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
+
+	"gdriveunion/internal/gcrypt"
 )
 
 const FolderMimeType = "application/vnd.google-apps.folder"
@@ -33,6 +35,14 @@ var exportMimeTypes = map[string]struct {
 type Account struct {
 	Name    string
 	Service *drive.Service
+
+	// Cipher is non-nil when this account has encryption enabled (see
+	// internal/gcrypt and `gdunion crypt enable`). gdrive itself never
+	// looks at it - it's just carried here so internal/unionfs, which
+	// already threads *Account everywhere, has it in reach without extra
+	// plumbing. Everything under an account with a non-nil Cipher is
+	// assumed to be encrypted.
+	Cipher *gcrypt.Cipher
 
 	quotaMu    sync.Mutex
 	quotaAt    time.Time

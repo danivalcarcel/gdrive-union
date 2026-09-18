@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"gdriveunion/internal/gdrive"
 )
 
 // Downloaded files are cached to disk under the OS temp dir, keyed by
@@ -82,13 +84,20 @@ func ensureCached(ctx context.Context, src Source, mimeType string, expectedSize
 		}
 		defer rc.Close()
 
+		var body io.Reader = rc
+		// Google-native docs are exported, not something gdunion ever
+		// encrypted, so never attempt to decrypt them.
+		if src.Account.Cipher != nil && gdrive.ExportSuffix(mimeType) == "" {
+			body = src.Account.Cipher.OpenReader(rc)
+		}
+
 		tmp := path + ".part"
 		f, err := os.Create(tmp)
 		if err != nil {
 			entry.err = err
 			return
 		}
-		_, copyErr := io.Copy(f, rc)
+		_, copyErr := io.Copy(f, body)
 		closeErr := f.Close()
 		if copyErr != nil {
 			os.Remove(tmp)

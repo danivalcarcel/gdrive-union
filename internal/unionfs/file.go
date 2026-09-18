@@ -84,12 +84,18 @@ func (n *FileNode) truncateRemote(ctx context.Context, size int64) error {
 		return err
 	}
 	defer f.Close()
-	updated, err := src.Account.UploadContent(ctx, src.FileID, f)
-	if err != nil {
+
+	var body io.Reader = f
+	if src.Account.Cipher != nil {
+		body = src.Account.Cipher.EncryptReader(f)
+	}
+	if _, err := src.Account.UploadContent(ctx, src.FileID, body); err != nil {
 		return err
 	}
 	n.mu.Lock()
-	n.size = updated.Size
+	// size, not whatever UploadContent reports back: with encryption on,
+	// that's the larger ciphertext size, not the size a user expects to see.
+	n.size = size
 	n.mu.Unlock()
 	return nil
 }
@@ -180,16 +186,28 @@ func (h *fileHandle) upload(ctx context.Context) syscall.Errno {
 	h.dirty = false
 	h.mu.Unlock()
 
+	fi, err := h.f.Stat()
+	if err != nil {
+		return syscall.EIO
+	}
+	plainSize := fi.Size()
+
 	if _, err := h.f.Seek(0, io.SeekStart); err != nil {
 		return syscall.EIO
 	}
 	src, _, _ := h.node.snapshot()
-	updated, err := src.Account.UploadContent(ctx, src.FileID, h.f)
-	if err != nil {
+
+	var body io.Reader = h.f
+	if src.Account.Cipher != nil {
+		body = src.Account.Cipher.EncryptReader(h.f)
+	}
+	if _, err := src.Account.UploadContent(ctx, src.FileID, body); err != nil {
 		return syscall.EIO
 	}
 	h.node.mu.Lock()
-	h.node.size = updated.Size
+	// The local file's own size, not what UploadContent reports back: with
+	// encryption on, that's the larger ciphertext size.
+	h.node.size = plainSize
 	h.node.mu.Unlock()
 	return 0
 }

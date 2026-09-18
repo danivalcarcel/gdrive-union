@@ -9,6 +9,7 @@ package unionfs
 import (
 	"context"
 	"fmt"
+	"io"
 	"mime"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
 
+	"gdriveunion/internal/gcrypt"
 	"gdriveunion/internal/gdrive"
 )
 
@@ -123,6 +125,25 @@ func (n *DirNode) refresh(ctx context.Context) (map[string]childInfo, error) {
 
 func mergeEntry(children map[string]childInfo, acc *gdrive.Account, e gdrive.Entry) {
 	name := e.Name
+	size := e.Size
+	if acc.Cipher != nil {
+		// Trial-decrypt: a name that doesn't decrypt (ok == false) predates
+		// encryption being turned on for this account, or isn't ours - use
+		// it as-is rather than hiding or erroring on it. See gcrypt's doc
+		// comment for why this trial decrypt is safe, not just probabilistic.
+		if plain, ok := acc.Cipher.DecryptName(e.Name); ok {
+			name = plain
+			// Google-native docs (Sheets/Docs/Slides) are never something
+			// gdunion encrypted - their content is exported, not stored by
+			// us - so their reported size is already the real one.
+			if !e.IsDir && gdrive.ExportSuffix(e.MimeType) == "" {
+				if plainSize, err := gcrypt.PlaintextSize(e.Size); err == nil {
+					size = plainSize
+				}
+			}
+		}
+	}
+
 	existing, collides := children[name]
 
 	if collides && existing.isDir && e.IsDir {
@@ -149,7 +170,7 @@ func mergeEntry(children map[string]childInfo, acc *gdrive.Account, e gdrive.Ent
 		isDir:    false,
 		fileSrc:  Source{Account: acc, FileID: e.ID},
 		mimeType: e.MimeType,
-		size:     e.Size,
+		size:     size,
 		modTime:  modTime,
 	}
 }
@@ -296,7 +317,11 @@ func (n *DirNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse
 	if errno != 0 {
 		return nil, errno
 	}
-	created, err := target.Account.CreateFolder(ctx, target.FileID, name)
+	remoteName := name
+	if target.Account.Cipher != nil {
+		remoteName = target.Account.Cipher.EncryptName(name)
+	}
+	created, err := target.Account.CreateFolder(ctx, target.FileID, remoteName)
 	if err != nil {
 		return nil, errnoFor(err)
 	}
@@ -323,7 +348,11 @@ func (n *DirNode) Create(ctx context.Context, name string, flags uint32, mode ui
 		return nil, nil, 0, errno
 	}
 	mimeType := guessMimeType(name)
-	created, err := target.Account.CreateFile(ctx, target.FileID, name, mimeType)
+	remoteName := name
+	if target.Account.Cipher != nil {
+		remoteName = target.Account.Cipher.EncryptName(name)
+	}
+	created, err := target.Account.CreateFile(ctx, target.FileID, remoteName, mimeType)
 	if err != nil {
 		return nil, nil, 0, errnoFor(err)
 	}
@@ -409,16 +438,25 @@ func (n *DirNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 func (n *DirNode) moveFileSource(ctx context.Context, src Source, mimeType string, destDir *DirNode, newName string) (Source, syscall.Errno) {
 	oldParentID, _ := n.parentIDFor(src.Account)
 	if newParentID, ok := destDir.parentIDFor(src.Account); ok {
+		// Same account: stays under the same key, if any.
+		remoteName := newName
+		if src.Account.Cipher != nil {
+			remoteName = src.Account.Cipher.EncryptName(newName)
+		}
 		if oldParentID != newParentID {
-			if err := src.Account.Move(ctx, src.FileID, newName, oldParentID, newParentID); err != nil {
+			if err := src.Account.Move(ctx, src.FileID, remoteName, oldParentID, newParentID); err != nil {
 				return Source{}, errnoFor(err)
 			}
-		} else if err := src.Account.Rename(ctx, src.FileID, newName); err != nil {
+		} else if err := src.Account.Rename(ctx, src.FileID, remoteName); err != nil {
 			return Source{}, errnoFor(err)
 		}
 		return src, 0
 	}
 
+	// Cross-account: no server-side move between accounts, so copy the
+	// bytes through this machine. Re-encrypt along the way for whichever
+	// side (source, destination, both or neither) has encryption enabled,
+	// rather than assuming they match.
 	target, errno := destDir.pickWriteTarget(ctx)
 	if errno != 0 {
 		return Source{}, errno
@@ -428,11 +466,25 @@ func (n *DirNode) moveFileSource(ctx context.Context, src Source, mimeType strin
 		return Source{}, errnoFor(err)
 	}
 	defer rc.Close()
-	created, err := target.Account.CreateFile(ctx, target.FileID, newName, mimeType)
+
+	var body io.Reader = rc
+	isExport := gdrive.ExportSuffix(mimeType) != ""
+	if !isExport && src.Account.Cipher != nil {
+		body = src.Account.Cipher.OpenReader(body)
+	}
+	if !isExport && target.Account.Cipher != nil {
+		body = target.Account.Cipher.EncryptReader(body)
+	}
+
+	remoteName := newName
+	if target.Account.Cipher != nil {
+		remoteName = target.Account.Cipher.EncryptName(newName)
+	}
+	created, err := target.Account.CreateFile(ctx, target.FileID, remoteName, mimeType)
 	if err != nil {
 		return Source{}, errnoFor(err)
 	}
-	if _, err := target.Account.UploadContent(ctx, created.ID, rc); err != nil {
+	if _, err := target.Account.UploadContent(ctx, created.ID, body); err != nil {
 		return Source{}, errnoFor(err)
 	}
 	if err := src.Account.Trash(ctx, src.FileID); err != nil {
@@ -450,11 +502,15 @@ func (n *DirNode) moveFolderSource(ctx context.Context, src Source, destDir *Dir
 	if !ok {
 		return Source{}, syscall.ENOTSUP
 	}
+	remoteName := newName
+	if src.Account.Cipher != nil {
+		remoteName = src.Account.Cipher.EncryptName(newName)
+	}
 	if oldParentID != newParentID {
-		if err := src.Account.Move(ctx, src.FileID, newName, oldParentID, newParentID); err != nil {
+		if err := src.Account.Move(ctx, src.FileID, remoteName, oldParentID, newParentID); err != nil {
 			return Source{}, errnoFor(err)
 		}
-	} else if err := src.Account.Rename(ctx, src.FileID, newName); err != nil {
+	} else if err := src.Account.Rename(ctx, src.FileID, remoteName); err != nil {
 		return Source{}, errnoFor(err)
 	}
 	return src, 0

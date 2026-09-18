@@ -58,6 +58,20 @@ func TokenPath(name string) (string, error) {
 	return filepath.Join(dir, name+".json"), nil
 }
 
+// KeyPath is where an account's encryption master key lives, if it has one
+// (see internal/gcrypt). Its presence is what turns encryption on for that
+// account - there's no separate on/off setting.
+func KeyPath(name string) (string, error) {
+	if strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid account name %q", name)
+	}
+	dir, err := accountsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name+".key"), nil
+}
+
 // ListAccounts returns the names of all accounts that have a saved token,
 // sorted alphabetically (this order also decides collision-naming priority
 // in the union tree: earlier accounts keep the plain name).

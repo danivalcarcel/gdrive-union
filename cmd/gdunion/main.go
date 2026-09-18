@@ -18,6 +18,7 @@ import (
 
 	"gdriveunion/internal/auth"
 	"gdriveunion/internal/config"
+	"gdriveunion/internal/gcrypt"
 	"gdriveunion/internal/gdrive"
 	"gdriveunion/internal/unionfs"
 )
@@ -32,6 +33,8 @@ func main() {
 	switch os.Args[1] {
 	case "auth":
 		err = authCmd(os.Args[2:])
+	case "crypt":
+		err = cryptCmd(os.Args[2:])
 	case "mount":
 		err = mountCmd(os.Args[2:])
 	default:
@@ -49,6 +52,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
   gdunion auth add <account-name> [--port N]   authorize a new Google account
   gdunion auth list                            list accounts and their quota
+  gdunion crypt enable <account-name>          turn on encryption for an account
+  gdunion crypt status                         show which accounts are encrypted
   gdunion mount <mountpoint>                   mount the union of all accounts
 
 --port sets a fixed local port (default 53682) for the OAuth callback
@@ -132,6 +137,69 @@ func authCmd(args []string) error {
 	}
 }
 
+func cryptCmd(args []string) error {
+	if len(args) < 1 {
+		usage()
+		os.Exit(1)
+	}
+
+	switch args[0] {
+	case "enable":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: gdunion crypt enable <account-name>")
+		}
+		name := args[1]
+		path, err := config.KeyPath(name)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("encryption is already enabled for %q (key file exists at %s) - refusing to overwrite it, since that would make everything already encrypted with it unreadable", name, path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+
+		key, err := gcrypt.GenerateKey()
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, key[:], 0o600); err != nil {
+			return err
+		}
+
+		fmt.Printf("Encryption enabled for %q.\n", name)
+		fmt.Printf("Key saved to %s - back it up somewhere safe.\n", path)
+		fmt.Println("Losing this file means losing access to everything gdunion encrypted with it - there is no recovery.")
+		fmt.Println("Only new files/folders created from now on are encrypted; anything already in this account's app folder stays as-is.")
+		return nil
+
+	case "status":
+		names, err := config.ListAccounts()
+		if err != nil {
+			return err
+		}
+		if len(names) == 0 {
+			fmt.Println("No accounts configured yet. Run: gdunion auth add <name>")
+			return nil
+		}
+		for _, name := range names {
+			path, err := config.KeyPath(name)
+			if err != nil {
+				return err
+			}
+			status := "plaintext"
+			if _, err := os.Stat(path); err == nil {
+				status = "encrypted"
+			}
+			fmt.Printf("%-20s %s\n", name, status)
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unknown subcommand: %s", args[0])
+	}
+}
+
 func mountCmd(args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: gdunion mount <mountpoint>")
@@ -202,7 +270,38 @@ func loadAccount(ctx context.Context, cfg *oauth2.Config, name string) (*gdrive.
 	if err != nil {
 		return nil, err
 	}
-	return gdrive.NewAccount(ctx, name, ts)
+	acc, err := gdrive.NewAccount(ctx, name, ts)
+	if err != nil {
+		return nil, err
+	}
+	cipher, err := loadCipher(name)
+	if err != nil {
+		return nil, fmt.Errorf("loading encryption key for %s: %w", name, err)
+	}
+	acc.Cipher = cipher
+	return acc, nil
+}
+
+// loadCipher returns nil, nil if encryption hasn't been enabled for name
+// (no key file yet - see `gdunion crypt enable`).
+func loadCipher(name string) (*gcrypt.Cipher, error) {
+	path, err := config.KeyPath(name)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(b) != gcrypt.KeySize {
+		return nil, fmt.Errorf("key file %s has size %d, expected %d - it may be corrupted", path, len(b), gcrypt.KeySize)
+	}
+	var key [gcrypt.KeySize]byte
+	copy(key[:], b)
+	return gcrypt.New(key)
 }
 
 // appFolderName is the dedicated Drive folder gdunion confines itself to

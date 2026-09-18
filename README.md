@@ -16,6 +16,11 @@ to its own dedicated `gdrive-union-<account-name>` folder (created automatically
 if it doesn't exist yet). Everything gdunion reads, merges or writes lives
 inside that one folder per account; the rest of that Drive is left alone.
 
+Optionally, per account, file content and filenames can be end-to-end
+encrypted (see [Encryption](#encryption)), so neither Google nor anyone
+with access to the Drive web UI can read them - only whoever holds the
+local key file can.
+
 ## Requirements
 
 - Linux or macOS (or WSL2 with FUSE support on Windows) with `libfuse3`
@@ -120,6 +125,50 @@ mountpoint with:
 fusermount3 -u ~/gdrive
 ```
 
+## Encryption
+
+Off by default. Turn it on per account:
+
+```bash
+gdunion crypt enable personal
+```
+
+This generates a random key and saves it to
+`~/.config/gdunion/accounts/personal.key` (readable only by you). From then
+on, everything gdunion creates or edits in that account is encrypted before
+it ever leaves this machine: file content, and filenames too (so the Drive
+web UI shows unreadable names, not just unreadable content).
+
+Check which accounts are encrypted:
+
+```bash
+gdunion crypt status
+```
+
+**Back up that key file.** There is no password reset, no recovery option,
+no way to ask Google for help: lose the key and everything gdunion
+encrypted with it is permanently unreadable. Treat it like an SSH private
+key.
+
+Notes:
+
+- Only *new* files/folders (created after `crypt enable`) are encrypted.
+  Anything already in that account's app folder stays exactly as it was;
+  gdunion keeps reading and writing it as plaintext, no migration happens
+  automatically.
+- Google Docs/Sheets/Slides are never encrypted (see Known limitations -
+  their content isn't something gdunion stores, so there's nothing to
+  encrypt).
+- The app folder's own name (`gdrive-union-<account-name>`) is never
+  encrypted, so you can still find it in the Drive UI - only what's *inside*
+  it is.
+- Moving a file between two accounts that both have encryption on
+  re-encrypts it with the destination's key along the way (see
+  Writing: how it works); it's never re-uploaded under one account's key
+  while readable with another's.
+- Overhead is small: about 44 bytes per 64KiB chunk (~0.07%), plus a 4-byte
+  header per file.
+
 ## How name collisions are resolved
 
 - If two accounts have a folder with the same name (e.g. "Documents"), they
@@ -172,3 +221,9 @@ fusermount3 -u ~/gdrive
 - No concurrency control across processes/machines: if two places edit the
   same file at once, whoever uploads last wins (no merge, no conflict
   warning).
+- Encryption assumes uniformity: once `crypt enable`d, gdunion treats
+  everything under that account as encrypted. It can still show and read
+  older plaintext files left over from before (best-effort fallback), but
+  their reported size may be off in that mixed scenario, since it's
+  normally computed from the encrypted size without downloading. Simplest
+  to enable encryption before putting real files in an account.

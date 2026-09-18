@@ -4,6 +4,7 @@ go 1.22
 
 require (
 	github.com/hanwen/go-fuse/v2 v2.5.1
+	golang.org/x/crypto v0.24.0
 	golang.org/x/oauth2 v0.21.0
 	google.golang.org/api v0.185.0
 )
@@ -26,7 +27,6 @@ require (
 	go.opentelemetry.io/otel v1.24.0 // indirect
 	go.opentelemetry.io/otel/metric v1.24.0 // indirect
 	go.opentelemetry.io/otel/trace v1.24.0 // indirect
-	golang.org/x/crypto v0.24.0 // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
