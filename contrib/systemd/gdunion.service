@@ -1,0 +1,33 @@
+# Reference systemd --user unit for gdunion. `install.sh --service`
+# generates and installs this automatically (with the right binary/mount
+# paths already filled in) - use this file only if you're setting things
+# up by hand, e.g. after building from source.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp gdunion.service ~/.config/systemd/user/
+#   # edit ExecStart below if gdunion isn't on /usr/local/bin, or you want
+#   # a mountpoint other than ~/gdrive
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gdunion.service
+#
+# For the mount to survive logging out (or come back after a reboot
+# without logging in at all), the user also needs lingering enabled:
+#   loginctl enable-linger "$(id -un)"
+
+[Unit]
+Description=gdunion - Google Drive union filesystem mount
+Documentation=https://github.com/danivalcarcel/gdrive-union
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gdunion mount %h/gdrive
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Install]
+WantedBy=default.target
