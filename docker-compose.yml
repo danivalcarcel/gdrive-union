@@ -1,0 +1,32 @@
+# Try gdunion (or develop/test it) without installing anything on the host
+# beyond Docker. See README's "Try it with Docker" section for the full
+# walkthrough. Quick version:
+#
+#   docker compose run --rm gdunion auth add personal --bind 0.0.0.0
+#   docker compose up
+#   docker compose exec gdunion sh   # poke around /mnt/gdrive from in here
+#
+# The FUSE mount only exists inside the container's own mount namespace -
+# it isn't visible in the host's filesystem. That's enough to try the tool
+# or run it as a semi-isolated background service; for a mount you can
+# browse with your normal host file manager/editor, install natively
+# instead (see README's "2. Install").
+services:
+  gdunion:
+    build: .
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    ports:
+      # For `auth add`'s OAuth callback. Matches --port's default (53682);
+      # change both together if you override --port.
+      - "53682:53682"
+    volumes:
+      # Persists OAuth tokens and encryption keys across `up`/`down`.
+      - gdunion-config:/root/.config/gdunion
+
+volumes:
+  gdunion-config:

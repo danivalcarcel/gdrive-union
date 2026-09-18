@@ -27,6 +27,13 @@ There are no automated tests in this repo yet. Verify changes by building
 and `go vet`-ing for `GOOS=linux`; actually exercising a mount requires a
 real Linux/WSL host with `fuse3` installed and at least one authorized
 Google account (`./gdunion auth add <name>`, then `./gdunion mount <dir>`).
+`docker compose up` (see `Dockerfile`/`docker-compose.yml`, README's "Try
+it with Docker") is another way to get that Linux+FUSE environment,
+including from a non-Linux dev machine with Docker installed - the
+container needs `SYS_ADMIN` + `/dev/fuse` access, which the compose file
+already requests. Note `auth add` needs `--bind 0.0.0.0` in that case:
+Docker's published-port forwarding doesn't arrive on loopback, unlike a
+plain `ssh -L` tunnel (see `internal/auth`'s `AddAccount` doc comment).
 
 `go mod tidy` needs network access to resolve/fetch dependency versions.
 
