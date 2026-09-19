@@ -208,6 +208,9 @@ func mountCmd(args []string) error {
 		return fmt.Errorf("usage: gdunion mount <mountpoint>")
 	}
 	mountPoint := args[0]
+	if err := os.MkdirAll(mountPoint, 0o755); err != nil {
+		return fmt.Errorf("creating mountpoint %s: %w", mountPoint, err)
+	}
 
 	ctx := context.Background()
 	names, err := config.ListAccounts()
