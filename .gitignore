@@ -1,4 +1,5 @@
 /gdunion
 /gdunion-linux-amd64
 /gdunion-linux-arm64
+/gdunion-config/
 *.tmp

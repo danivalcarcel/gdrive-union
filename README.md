@@ -142,13 +142,26 @@ FUSE filesystems at all - [`docker-compose.yml`](docker-compose.yml)
 already requests both, so plain `docker compose` commands are enough; you
 don't need to pass extra flags yourself.
 
+`docker-compose.yml` mounts `./gdunion-config` (a plain directory next to
+the compose file, override with `GDUNION_CONFIG_DIR`) as the container's
+`~/.config/gdunion` - a normal host folder, not a named volume, so getting
+credentials in or out is just regular file operations, no `docker exec`
+needed. If you've already run gdunion natively and don't want to
+re-authorize, point straight at that config instead of the default and
+skip step 1 below entirely:
+
+```bash
+GDUNION_CONFIG_DIR=$HOME/.config/gdunion docker compose up
+```
+
+Starting from scratch:
+
 1. Get OAuth credentials the same way as step 1 above (Google Cloud
-   Console), and copy the downloaded JSON into the container's config
-   volume (a one-off container just for this, since it's a named volume
-   rather than a bind mount):
+   Console), and drop the downloaded JSON into the config folder:
 
    ```bash
-   docker compose run --rm -T gdunion sh -c 'cat > /root/.config/gdunion/client_secret.json' < /path/to/client_secret.json
+   mkdir -p ./gdunion-config
+   cp /path/to/client_secret.json ./gdunion-config/
    ```
 
 2. Add an account. Note the `--bind 0.0.0.0`: unlike running natively,
