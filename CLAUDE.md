@@ -12,6 +12,13 @@ end-user setup flow (OAuth credential creation, adding accounts, mounting)
 and the exact semantics of writes, renames, and known limitations - don't
 duplicate that here, read it when those details matter.
 
+`install.sh --service` sets a mount up as a systemd `--user` service
+(unit generated on the fly, see the function `setup_service` in
+`install.sh`); `contrib/systemd/gdunion.service` is the equivalent
+reference unit for a manual/from-source setup. `gdunion mount` creates the
+mountpoint directory itself if it doesn't exist, which both of those rely
+on (no separate `mkdir` step needed before `ExecStart` runs).
+
 ## Commands
 
 FUSE only builds/runs on Linux (and Darwin), so on a non-Linux dev machine
@@ -100,7 +107,13 @@ Five packages, each with a single responsibility, composed in
     gives no read-your-writes guarantee on `Files.list`. `pickWriteTarget`
     is the "most free space" placement policy, restricted to accounts that
     already have a folder at that path (you can only create inside a folder
-    that exists in that account's graph).
+    that exists in that account's graph). `Statfs` aggregates `df` numbers
+    the same way: sums `CachedQuota` (dedupe'd by account pointer) across
+    `n.sources`, falling back to a large fixed sentinel
+    (`unlimitedStatfsBlocks`, not `gdrive.Quota.FreeBytes`'s own sentinel,
+    which is sized for single-account comparisons and would risk
+    overflowing once several accounts are summed) if any contributing
+    account has no fixed limit (e.g. Workspace unlimited storage).
   - `file.go`: `FileNode` (one file, one `Source`) and `fileHandle` (the
     open file). Reads and writes both go through a local cache file at a
     deterministic path; writes are buffered locally and uploaded whole on

@@ -50,7 +50,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  gdunion auth add <account-name> [--port N] [--bind ADDR]   authorize a new Google account
+  gdunion auth add [--port N] [--bind ADDR] <account-name>   authorize a new Google account
   gdunion auth list                                          list accounts and their quota
   gdunion crypt enable <account-name>                        turn on encryption for an account
   gdunion crypt status                                       show which accounts are encrypted
@@ -63,7 +63,11 @@ the browser completing the login isn't on the same machine as gdunion.
 --bind sets the address that callback server listens on (default
 127.0.0.1). Use "0.0.0.0" when running inside a container, so Docker's
 published-port forwarding (which doesn't arrive on the loopback interface)
-can reach it.`)
+can reach it.
+
+Flags must come before the account name (Go's flag parsing stops at the
+first non-flag argument): "gdunion auth add --port 53682 personal", not
+"gdunion auth add personal --port 53682".`)
 }
 
 func authCmd(args []string) error {
@@ -82,7 +86,7 @@ func authCmd(args []string) error {
 			return err
 		}
 		if fs.NArg() != 1 {
-			return fmt.Errorf("usage: gdunion auth add <account-name> [--port N] [--bind ADDR]")
+			return fmt.Errorf("usage: gdunion auth add [--port N] [--bind ADDR] <account-name> (flags must come before the account name)")
 		}
 		name := fs.Arg(0)
 
@@ -211,6 +215,9 @@ func mountCmd(args []string) error {
 		return fmt.Errorf("usage: gdunion mount <mountpoint>")
 	}
 	mountPoint := args[0]
+	if err := os.MkdirAll(mountPoint, 0o755); err != nil {
+		return fmt.Errorf("creating mountpoint %s: %w", mountPoint, err)
+	}
 
 	ctx := context.Background()
 	names, err := config.ListAccounts()

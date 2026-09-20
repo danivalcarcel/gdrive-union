@@ -94,20 +94,31 @@ func (q Quota) FreeBytes() int64 {
 // long enough that creating many small files doesn't cost an API call each.
 const freeSpaceTTL = 60 * time.Second
 
-// FreeSpace is like Quota().FreeBytes() but cached, for use on the hot path
-// of deciding where to place a new file or folder.
-func (a *Account) FreeSpace(ctx context.Context) (int64, error) {
+// CachedQuota is like Quota but reuses a reading for up to freeSpaceTTL,
+// for use on hot paths: deciding where to place a new file/folder, and
+// aggregating space for `df` (see internal/unionfs's Statfs).
+func (a *Account) CachedQuota(ctx context.Context) (Quota, error) {
 	a.quotaMu.Lock()
 	defer a.quotaMu.Unlock()
 	if time.Since(a.quotaAt) >= freeSpaceTTL {
 		q, err := a.Quota(ctx)
 		if err != nil {
-			return 0, err
+			return Quota{}, err
 		}
 		a.quotaCache = q
 		a.quotaAt = time.Now()
 	}
-	return a.quotaCache.FreeBytes(), nil
+	return a.quotaCache, nil
+}
+
+// FreeSpace is CachedQuota(ctx).FreeBytes(), for callers that only care
+// about the free-space number.
+func (a *Account) FreeSpace(ctx context.Context) (int64, error) {
+	q, err := a.CachedQuota(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return q.FreeBytes(), nil
 }
 
 // Entry is one child returned by ListChildren.

@@ -119,16 +119,54 @@ gdunion auth list
 ## 4. Mount
 
 ```bash
-mkdir -p ~/gdrive
 gdunion mount ~/gdrive
 ```
 
-Ctrl+C unmounts cleanly. If the process dies without unmounting, free the
-mountpoint with:
+(creates `~/gdrive` if it doesn't exist yet). Ctrl+C unmounts cleanly. If
+the process dies without unmounting, free the mountpoint with:
 
 ```bash
 fusermount3 -u ~/gdrive
 ```
+
+Running this by hand works fine, but it stops when you close the terminal.
+For a mount that stays up (and comes back after a reboot), see
+[Running as a service](#running-as-a-service) below.
+
+## Running as a service
+
+Rather than running `gdunion mount` by hand every time, set it up as a
+systemd `--user` service:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/danivalcarcel/gdrive-union/master/install.sh | bash -s -- --service
+```
+
+(or `./install.sh --service` if you already have the repo checked out).
+This installs/updates the binary, writes a unit to
+`~/.config/systemd/user/gdunion.service`, and enables + starts it, mounting
+to `~/gdrive` by default (override with `GDUNION_MOUNTPOINT=/other/path`).
+
+For the mount to survive logging out entirely (or come back after a reboot
+without ever logging in - the normal case for a headless server), the
+service also needs **lingering** enabled for your user; the script tries
+this automatically and tells you if it couldn't:
+
+```bash
+loginctl enable-linger "$(id -un)"
+```
+
+Useful commands once it's set up:
+
+```bash
+systemctl --user status gdunion.service        # is it running?
+journalctl --user -u gdunion.service -f        # logs
+systemctl --user restart gdunion.service        # e.g. after adding an account
+```
+
+Setting it up by hand (building from source, or on a machine where you'd
+rather not run `install.sh`) is documented in
+[`contrib/systemd/gdunion.service`](contrib/systemd/gdunion.service).
 
 ## Try it with Docker
 
