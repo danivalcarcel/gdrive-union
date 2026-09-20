@@ -9,18 +9,13 @@
 # targets (amd64, arm64, ...), so this Dockerfile doesn't need per-arch
 # branches.
 
-FROM golang:1.22-bookworm AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/gdunion ./cmd/gdunion
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        fuse3 \
-        ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM alpine:3
+RUN apk add --no-cache fuse3 ca-certificates
 COPY --from=build /out/gdunion /usr/local/bin/gdunion
 RUN mkdir -p /mnt/gdrive
 ENTRYPOINT ["gdunion"]
