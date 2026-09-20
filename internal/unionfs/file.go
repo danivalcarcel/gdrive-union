@@ -47,6 +47,7 @@ func (n *FileNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrO
 	out.SetTimes(nil, &n.modTime, nil)
 	out.Uid = mountUID
 	out.Gid = mountGID
+	out.Nlink = 1
 	return 0
 }
 

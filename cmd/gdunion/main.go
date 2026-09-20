@@ -54,7 +54,11 @@ func usage() {
   gdunion auth list                                          list accounts and their quota
   gdunion crypt enable <account-name>                        turn on encryption for an account
   gdunion crypt status                                       show which accounts are encrypted
-  gdunion mount <mountpoint>                                 mount the union of all accounts
+  gdunion mount [--allow-other] <mountpoint>                 mount the union of all accounts
+
+--allow-other lets other local users (e.g. a Samba or NFS server running as
+root) access the mount, not just the user running gdunion. Requires
+"user_allow_other" to be set in /etc/fuse.conf, or the mount will fail.
 
 --port sets a fixed local port (default 53682) for the OAuth callback
 instead of a random one, useful for "ssh -L 53682:localhost:53682 host" when
@@ -211,10 +215,15 @@ func cryptCmd(args []string) error {
 }
 
 func mountCmd(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: gdunion mount <mountpoint>")
+	fs := flag.NewFlagSet("mount", flag.ContinueOnError)
+	allowOther := fs.Bool("allow-other", false, "allow other local users (e.g. a Samba or NFS server) to access the mount; requires user_allow_other in /etc/fuse.conf")
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	mountPoint := args[0]
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: gdunion mount [--allow-other] <mountpoint>")
+	}
+	mountPoint := fs.Arg(0)
 	if err := os.MkdirAll(mountPoint, 0o755); err != nil {
 		return fmt.Errorf("creating mountpoint %s: %w", mountPoint, err)
 	}
@@ -251,7 +260,7 @@ func mountCmd(args []string) error {
 		MountOptions: fuse.MountOptions{
 			FsName:     "gdunion",
 			Name:       "gdunion",
-			AllowOther: false,
+			AllowOther: *allowOther,
 		},
 	})
 	if err != nil {
