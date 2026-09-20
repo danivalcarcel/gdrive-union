@@ -9,6 +9,7 @@ package unionfs
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"mime"
 	"os"
@@ -257,7 +258,7 @@ func (n *DirNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (
 	if !ok {
 		return nil, syscall.ENOENT
 	}
-	return n.inodeFor(ctx, info, out), 0
+	return n.inodeFor(ctx, name, info, out), 0
 }
 
 func (n *DirNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
@@ -271,30 +272,66 @@ func (n *DirNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		if info.isDir {
 			mode = fuse.S_IFDIR
 		}
-		entries = append(entries, fuse.DirEntry{Name: name, Mode: mode})
+		entries = append(entries, fuse.DirEntry{Name: name, Mode: mode, Ino: nameIno(name)})
 	}
 	return fs.NewListDirStream(entries), 0
 }
 
-func (n *DirNode) inodeFor(ctx context.Context, info childInfo, out *fuse.EntryOut) *fs.Inode {
+// nameIno derives a stable, non-zero inode number for a directory entry from
+// its name, for the entry list returned by Readdir. A zero Ino (the default
+// for a DirEntry that doesn't set one) is POSIX shorthand for "deleted, treat
+// as absent" - readdir() wrappers as well-established as glibc's, and Samba's
+// own directory-listing code, silently drop any entry reported that way. The
+// exact value doesn't need to be globally stable across calls (that's what
+// NodeLookuper/inodeFor's real StableAttr is for) - it only has to be
+// non-zero and cheap, since this is purely to keep those callers from
+// mistaking a live entry for a deleted one.
+func nameIno(name string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(name))
+	sum := h.Sum64()
+	if sum == 0 {
+		return 1
+	}
+	return sum
+}
+
+// inodeFor builds the child inode for a directory entry. Its StableAttr.Ino
+// must be derived from name via nameIno the same way Readdir's DirEntry.Ino
+// is - go-fuse otherwise auto-assigns an unrelated internal number here,
+// which won't match what Readdir already reported for that name. Samba's
+// directory-listing code (openat_pathref_fsp, added as a TOCTOU hardening
+// check) re-resolves each entry and rejects it outright if the inode number
+// it gets back doesn't match the one from the initial listing - so a mismatch
+// here silently drops every single entry from an SMB client's view, while a
+// plain `ls` (which never cross-checks inode numbers this way) shows them
+// fine.
+func (n *DirNode) inodeFor(ctx context.Context, name string, info childInfo, out *fuse.EntryOut) *fs.Inode {
 	out.SetAttrTimeout(listTTL)
 	out.SetEntryTimeout(listTTL)
 	out.Uid = mountUID
 	out.Gid = mountGID
+	// An unset Nlink defaults to 0, which POSIX conventionally reads as
+	// "unlinked/deleted" - Samba's own directory-listing code checks for
+	// exactly that (VALID_STAT) and silently drops any entry reporting it,
+	// which is why every entry vanished over SMB despite `ls` showing them
+	// fine (a plain stat(2) caller has no reason to make that check).
+	out.Nlink = 1
+	ino := nameIno(name)
 
 	if info.isDir {
 		out.Mode = fuse.S_IFDIR | 0o755
 		now := time.Now()
 		out.SetTimes(&now, &now, &now)
 		child := &DirNode{sources: info.dirSources}
-		return n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFDIR})
+		return n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFDIR, Ino: ino})
 	}
 
 	out.Mode = fuse.S_IFREG | 0o644
 	out.Size = uint64(info.size)
 	out.SetTimes(nil, &info.modTime, nil)
 	child := &FileNode{src: info.fileSrc, mimeType: info.mimeType, size: info.size, modTime: info.modTime}
-	return n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFREG})
+	return n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFREG, Ino: ino})
 }
 
 // errnoFor maps a generic (Drive API) error to a FUSE errno; we don't try to
@@ -391,7 +428,7 @@ func (n *DirNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse
 
 	info := childInfo{isDir: true, dirSources: []Source{{Account: target.Account, FileID: created.ID}}}
 	n.putChild(name, info)
-	return n.inodeFor(ctx, info, out), 0
+	return n.inodeFor(ctx, name, info, out), 0
 }
 
 // Create makes a new, empty file in Drive immediately (so it shows up in
@@ -437,9 +474,10 @@ func (n *DirNode) Create(ctx context.Context, name string, flags uint32, mode ui
 	out.Mode = fuse.S_IFREG | 0o644
 	out.Uid = mountUID
 	out.Gid = mountGID
+	out.Nlink = 1
 	out.SetAttrTimeout(listTTL)
 	out.SetEntryTimeout(listTTL)
-	inode := n.NewInode(ctx, fileNode, fs.StableAttr{Mode: fuse.S_IFREG})
+	inode := n.NewInode(ctx, fileNode, fs.StableAttr{Mode: fuse.S_IFREG, Ino: nameIno(name)})
 	return inode, &fileHandle{f: f, node: fileNode}, fuse.FOPEN_KEEP_CACHE, 0
 }
 
