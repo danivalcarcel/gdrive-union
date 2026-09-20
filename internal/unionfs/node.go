@@ -512,15 +512,48 @@ func (n *DirNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 	if !info.isDir {
 		return syscall.ENOTDIR
 	}
-	for _, src := range info.dirSources {
-		kids, err := src.Account.ListChildren(ctx, src.FileID)
-		if err != nil {
-			return errnoFor(err)
-		}
-		if len(kids) > 0 {
+
+	// Each source's emptiness check is an independent Drive API round-trip;
+	// run them concurrently rather than one after another so Rmdir on a
+	// folder merging several accounts doesn't take as many round-trips'
+	// worth of latency as it has sources. Cancel the rest as soon as one
+	// source is found non-empty, since that already settles the call.
+	checkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]syscall.Errno, len(info.dirSources))
+	var wg sync.WaitGroup
+	for i, src := range info.dirSources {
+		wg.Add(1)
+		go func(i int, src Source) {
+			defer wg.Done()
+			kids, err := src.Account.ListChildren(checkCtx, src.FileID)
+			switch {
+			case len(kids) > 0 && err == nil:
+				results[i] = syscall.ENOTEMPTY
+				cancel()
+			case err != nil:
+				results[i] = errnoFor(err)
+			}
+		}(i, src)
+	}
+	wg.Wait()
+
+	// ENOTEMPTY (the normal reason this check fails) takes priority over any
+	// other source's error, since cancelling their in-flight requests above
+	// can itself surface as an error that has nothing to do with the real
+	// answer.
+	for _, errno := range results {
+		if errno == syscall.ENOTEMPTY {
 			return syscall.ENOTEMPTY
 		}
 	}
+	for _, errno := range results {
+		if errno != 0 {
+			return errno
+		}
+	}
+
 	for _, src := range info.dirSources {
 		if err := src.Account.Trash(ctx, src.FileID); err != nil {
 			return errnoFor(err)
