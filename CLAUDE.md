@@ -100,7 +100,13 @@ Five packages, each with a single responsibility, composed in
     gives no read-your-writes guarantee on `Files.list`. `pickWriteTarget`
     is the "most free space" placement policy, restricted to accounts that
     already have a folder at that path (you can only create inside a folder
-    that exists in that account's graph).
+    that exists in that account's graph). `Statfs` aggregates `df` numbers
+    the same way: sums `CachedQuota` (dedupe'd by account pointer) across
+    `n.sources`, falling back to a large fixed sentinel
+    (`unlimitedStatfsBlocks`, not `gdrive.Quota.FreeBytes`'s own sentinel,
+    which is sized for single-account comparisons and would risk
+    overflowing once several accounts are summed) if any contributing
+    account has no fixed limit (e.g. Workspace unlimited storage).
   - `file.go`: `FileNode` (one file, one `Source`) and `fileHandle` (the
     open file). Reads and writes both go through a local cache file at a
     deterministic path; writes are buffered locally and uploaded whole on

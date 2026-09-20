@@ -78,6 +78,7 @@ var (
 	_ fs.NodeUnlinker  = (*DirNode)(nil)
 	_ fs.NodeRmdirer   = (*DirNode)(nil)
 	_ fs.NodeRenamer   = (*DirNode)(nil)
+	_ fs.NodeStatfser  = (*DirNode)(nil)
 )
 
 // NewRoot builds the tree root, one virtual directory merging the given
@@ -94,6 +95,66 @@ func (n *DirNode) Getattr(ctx context.Context, f fs.FileHandle, out *fuse.AttrOu
 	out.Nlink = 1
 	out.Uid = mountUID
 	out.Gid = mountGID
+	// Directories don't map to a single real mtime (they can merge folders
+	// from several accounts) - report "now" rather than leaving it at the
+	// zero value, which tools display as 1970-01-01 and read as "no info".
+	now := time.Now()
+	out.SetTimes(&now, &now, &now)
+	return 0
+}
+
+// statfsBlockSize is an arbitrary, conventional block size for the
+// synthetic values below; only their ratios (used vs. total) matter to
+// tools like `df`.
+const statfsBlockSize = 4096
+
+// unlimitedStatfsBlocks stands in for "no meaningful ceiling" (e.g. a
+// Google Workspace account with unlimited storage): a large but safely
+// summable number of blocks, rather than reusing gdrive.Quota.FreeBytes'
+// own sentinel (which is sized for single-account comparisons and would
+// risk overflowing a uint64 total once multiple accounts are added up).
+const unlimitedStatfsBlocks = 1 << 40 // ~4.5PB at 4096-byte blocks
+
+// Statfs reports aggregate space across every account backing this
+// directory, so `df` shows real numbers instead of the default zeroes.
+// Best-effort: an account whose quota can't be fetched right now is
+// skipped rather than failing the whole call.
+func (n *DirNode) Statfs(ctx context.Context, out *fuse.StatfsOut) syscall.Errno {
+	seen := make(map[*gdrive.Account]bool, len(n.sources))
+	var totalBytes, freeBytes int64
+	unlimited := false
+
+	for _, src := range n.sources {
+		if seen[src.Account] {
+			continue
+		}
+		seen[src.Account] = true
+
+		q, err := src.Account.CachedQuota(ctx)
+		if err != nil {
+			continue
+		}
+		if q.LimitBytes == 0 {
+			unlimited = true
+			continue
+		}
+		totalBytes += q.LimitBytes
+		if free := q.LimitBytes - q.UsageBytes; free > 0 {
+			freeBytes += free
+		}
+	}
+
+	if unlimited {
+		out.Blocks = unlimitedStatfsBlocks
+		out.Bfree = unlimitedStatfsBlocks
+	} else {
+		out.Blocks = uint64(totalBytes) / statfsBlockSize
+		out.Bfree = uint64(freeBytes) / statfsBlockSize
+	}
+	out.Bavail = out.Bfree
+	out.Bsize = statfsBlockSize
+	out.Frsize = statfsBlockSize
+	out.NameLen = 255
 	return 0
 }
 
@@ -223,6 +284,8 @@ func (n *DirNode) inodeFor(ctx context.Context, info childInfo, out *fuse.EntryO
 
 	if info.isDir {
 		out.Mode = fuse.S_IFDIR | 0o755
+		now := time.Now()
+		out.SetTimes(&now, &now, &now)
 		child := &DirNode{sources: info.dirSources}
 		return n.NewInode(ctx, child, fs.StableAttr{Mode: fuse.S_IFDIR})
 	}
