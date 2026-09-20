@@ -149,14 +149,21 @@ type encryptReader struct {
 	src io.Reader
 	buf bytes.Buffer
 	eof bool
+
+	// chunk and sealBuf are reused across chunks (rather than allocated
+	// fresh each time) so encrypting a large file doesn't cost one heap
+	// allocation of each per 64KiB chunk. Both are sized to exactly fit the
+	// largest a single chunk can ever be, so secretbox.Seal never needs to
+	// grow sealBuf's backing array.
+	chunk   [chunkPlain]byte
+	sealBuf [chunkPlain + secretbox.Overhead]byte
 }
 
 func (er *encryptReader) Read(p []byte) (int, error) {
 	for er.buf.Len() == 0 && !er.eof {
-		chunk := make([]byte, chunkPlain)
-		n, err := io.ReadFull(er.src, chunk)
+		n, err := io.ReadFull(er.src, er.chunk[:])
 		if n > 0 {
-			er.seal(chunk[:n])
+			er.seal(er.chunk[:n])
 		}
 		switch {
 		case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
@@ -173,7 +180,7 @@ func (er *encryptReader) Read(p []byte) (int, error) {
 
 func (er *encryptReader) seal(plain []byte) {
 	nonce := randomNonce()
-	sealed := secretbox.Seal(nil, plain, &nonce, &er.c.contentKey)
+	sealed := secretbox.Seal(er.sealBuf[:0], plain, &nonce, &er.c.contentKey)
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(nonceSize+len(sealed)))
 	er.buf.Write(lenBuf[:])
@@ -197,11 +204,26 @@ func (c *Cipher) OpenReader(r io.Reader) io.Reader {
 	return &decryptReader{c: c, src: r}
 }
 
+// maxFrame is the largest a single chunk's (nonce + sealed ciphertext) can
+// ever legitimately be, i.e. exactly what EncryptReader produces for a full
+// chunkPlain-sized chunk. decryptReader rejects anything claiming to be
+// bigger outright as corrupt, rather than trusting an attacker- or
+// corruption-controlled length prefix enough to attempt an allocation of
+// that size.
+const maxFrame = nonceSize + chunkPlain + secretbox.Overhead
+
 type decryptReader struct {
 	c   *Cipher
 	src io.Reader
 	buf bytes.Buffer
 	eof bool
+
+	// frameBuf and openBuf are reused across chunks (rather than allocated
+	// fresh each time) so decrypting a large file doesn't cost two heap
+	// allocations per chunk. Both are sized to exactly fit the largest a
+	// single chunk can ever be.
+	frameBuf [maxFrame]byte
+	openBuf  [chunkPlain]byte
 }
 
 func (dr *decryptReader) Read(p []byte) (int, error) {
@@ -215,16 +237,16 @@ func (dr *decryptReader) Read(p []byte) (int, error) {
 			return 0, fmt.Errorf("gcrypt: reading chunk length: %w", err)
 		}
 		frameLen := binary.BigEndian.Uint32(lenBuf[:])
-		if frameLen < nonceSize+secretbox.Overhead {
-			return 0, errors.New("gcrypt: corrupt stream (chunk too short)")
+		if frameLen < nonceSize+secretbox.Overhead || frameLen > maxFrame {
+			return 0, errors.New("gcrypt: corrupt stream (invalid chunk length)")
 		}
-		frame := make([]byte, frameLen)
+		frame := dr.frameBuf[:frameLen]
 		if _, err := io.ReadFull(dr.src, frame); err != nil {
 			return 0, fmt.Errorf("gcrypt: reading chunk: %w", err)
 		}
 		var nonce [nonceSize]byte
 		copy(nonce[:], frame[:nonceSize])
-		opened, ok := secretbox.Open(nil, frame[nonceSize:], &nonce, &dr.c.contentKey)
+		opened, ok := secretbox.Open(dr.openBuf[:0], frame[nonceSize:], &nonce, &dr.c.contentKey)
 		if !ok {
 			return 0, errors.New("gcrypt: decryption failed (wrong key, or data is corrupted)")
 		}
