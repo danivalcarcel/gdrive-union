@@ -29,7 +29,7 @@ local key file can.
   sudo apt install fuse3
   ```
 - A Google Cloud account to create OAuth credentials (free).
-- Go 1.22+, only if building from source instead of using the install
+- Go 1.27+, only if building from source instead of using the install
   script below.
 
 ## 1. Create OAuth credentials (one time)
