@@ -12,6 +12,13 @@ end-user setup flow (OAuth credential creation, adding accounts, mounting)
 and the exact semantics of writes, renames, and known limitations - don't
 duplicate that here, read it when those details matter.
 
+`install.sh --service` sets a mount up as a systemd `--user` service
+(unit generated on the fly, see the function `setup_service` in
+`install.sh`); `contrib/systemd/gdunion.service` is the equivalent
+reference unit for a manual/from-source setup. `gdunion mount` creates the
+mountpoint directory itself if it doesn't exist, which both of those rely
+on (no separate `mkdir` step needed before `ExecStart` runs).
+
 ## Commands
 
 FUSE only builds/runs on Linux (and Darwin), so on a non-Linux dev machine
