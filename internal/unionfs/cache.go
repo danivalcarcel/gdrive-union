@@ -116,5 +116,21 @@ func ensureCached(ctx context.Context, src Source, mimeType string, expectedSize
 		entry.path = path
 	})
 
+	// A sync.Once only ever runs its function once for a given *cacheEntry,
+	// but that's only meant to coalesce callers racing to cache the same key
+	// at the same time, not to memoize the result forever - entry.err or a
+	// stale entry.path must not outlive this call, or a later ensureCached
+	// for the same key (e.g. after the file changed size on Drive, or after
+	// a transient download error) would keep returning it untouched for the
+	// rest of the mount's life instead of re-checking. Drop the entry now
+	// that this round of coalesced callers is done with it, so the next
+	// distinct call starts fresh. Guard against removing a newer entry that
+	// another goroutine may have already installed in our place.
+	downloadMu.Lock()
+	if downloadState[key] == entry {
+		delete(downloadState, key)
+	}
+	downloadMu.Unlock()
+
 	return entry.path, entry.err
 }
