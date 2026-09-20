@@ -51,10 +51,17 @@ func LoadOAuthConfig() (*oauth2.Config, error) {
 // port at random; pass a fixed port when the browser completing the login
 // isn't on the same machine as gdunion (e.g. running on a headless server
 // over SSH), so an `ssh -L <port>:localhost:<port>` tunnel can reach it.
-func AddAccount(ctx context.Context, cfg *oauth2.Config, name string, port int) (*oauth2.Token, error) {
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+//
+// bindAddr is normally "127.0.0.1" (RFC 8252's recommended loopback-only
+// flow): the browser always navigates to 127.0.0.1 regardless, since that's
+// where it (not gdunion) is running. The exception is inside a container -
+// Docker's published-port forwarding arrives on the container's regular
+// network interface, not its loopback, so a server bound to 127.0.0.1
+// there would refuse it. Pass "0.0.0.0" in that case.
+func AddAccount(ctx context.Context, cfg *oauth2.Config, name, bindAddr string, port int) (*oauth2.Token, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", bindAddr, port))
 	if err != nil {
-		return nil, fmt.Errorf("starting local listener on port %d: %w", port, err)
+		return nil, fmt.Errorf("starting local listener on %s:%d: %w", bindAddr, port, err)
 	}
 	defer listener.Close()
 

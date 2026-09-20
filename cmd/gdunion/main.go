@@ -50,16 +50,22 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
-  gdunion auth add [--port N] <account-name>   authorize a new Google account
-  gdunion auth list                            list accounts and their quota
-  gdunion crypt enable <account-name>          turn on encryption for an account
-  gdunion crypt status                         show which accounts are encrypted
-  gdunion mount <mountpoint>                   mount the union of all accounts
+  gdunion auth add [--port N] [--bind ADDR] <account-name>   authorize a new Google account
+  gdunion auth list                                          list accounts and their quota
+  gdunion crypt enable <account-name>                        turn on encryption for an account
+  gdunion crypt status                                       show which accounts are encrypted
+  gdunion mount <mountpoint>                                 mount the union of all accounts
 
 --port sets a fixed local port (default 53682) for the OAuth callback
 instead of a random one, useful for "ssh -L 53682:localhost:53682 host" when
 the browser completing the login isn't on the same machine as gdunion.
-It must come before the account name (Go's flag parsing stops at the
+
+--bind sets the address that callback server listens on (default
+127.0.0.1). Use "0.0.0.0" when running inside a container, so Docker's
+published-port forwarding (which doesn't arrive on the loopback interface)
+can reach it.
+
+Flags must come before the account name (Go's flag parsing stops at the
 first non-flag argument): "gdunion auth add --port 53682 personal", not
 "gdunion auth add personal --port 53682".`)
 }
@@ -75,11 +81,12 @@ func authCmd(args []string) error {
 	case "add":
 		fs := flag.NewFlagSet("auth add", flag.ContinueOnError)
 		port := fs.Int("port", 53682, "local port for the OAuth callback (fixed, so ssh -L can forward it)")
+		bind := fs.String("bind", "127.0.0.1", `address the OAuth callback server listens on; use "0.0.0.0" when running inside a container so Docker's port forwarding can reach it`)
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 {
-			return fmt.Errorf("usage: gdunion auth add [--port N] <account-name> (flags must come before the account name)")
+			return fmt.Errorf("usage: gdunion auth add [--port N] [--bind ADDR] <account-name> (flags must come before the account name)")
 		}
 		name := fs.Arg(0)
 
@@ -87,7 +94,7 @@ func authCmd(args []string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := auth.AddAccount(ctx, cfg, name, *port); err != nil {
+		if _, err := auth.AddAccount(ctx, cfg, name, *bind, *port); err != nil {
 			return err
 		}
 		fmt.Printf("Account %q authorized successfully.\n", name)

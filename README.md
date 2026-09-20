@@ -70,6 +70,11 @@ go mod tidy   # fetches dependencies (needs network)
 go build -o gdunion ./cmd/gdunion
 ```
 
+Or, to try it (or develop/test it) without installing anything on your
+machine beyond Docker, see [Try it with Docker](#try-it-with-docker) below
+and skip straight to step 3 - Docker handles the rest of this page's steps
+for you.
+
 ## 3. Add accounts
 
 ```bash
@@ -162,6 +167,74 @@ systemctl --user restart gdunion.service        # e.g. after adding an account
 Setting it up by hand (building from source, or on a machine where you'd
 rather not run `install.sh`) is documented in
 [`contrib/systemd/gdunion.service`](contrib/systemd/gdunion.service).
+
+## Try it with Docker
+
+An alternative to steps 1-4 above: build and run gdunion in a container,
+so nothing touches your host beyond Docker itself. Useful for trying the
+tool, or for development/testing without a Linux machine handy.
+
+Requirements: Docker with Compose v2 (`docker compose version` should
+work). The container needs `SYS_ADMIN` and access to `/dev/fuse` to mount
+FUSE filesystems at all - [`docker-compose.yml`](docker-compose.yml)
+already requests both, so plain `docker compose` commands are enough; you
+don't need to pass extra flags yourself.
+
+`docker-compose.yml` mounts `./gdunion-config` (a plain directory next to
+the compose file, override with `GDUNION_CONFIG_DIR`) as the container's
+`~/.config/gdunion` - a normal host folder, not a named volume, so getting
+credentials in or out is just regular file operations, no `docker exec`
+needed. If you've already run gdunion natively and don't want to
+re-authorize, point straight at that config instead of the default and
+skip step 1 below entirely:
+
+```bash
+GDUNION_CONFIG_DIR=$HOME/.config/gdunion docker compose up
+```
+
+Starting from scratch:
+
+1. Get OAuth credentials the same way as step 1 above (Google Cloud
+   Console), and drop the downloaded JSON into the config folder:
+
+   ```bash
+   mkdir -p ./gdunion-config
+   cp /path/to/client_secret.json ./gdunion-config/
+   ```
+
+2. Add an account. Note the `--bind 0.0.0.0`: unlike running natively,
+   Docker's published-port forwarding doesn't arrive on the loopback
+   interface, so the OAuth callback server needs to listen on all
+   interfaces *inside* the container (see `gdunion auth add`'s `--bind`
+   flag) - the URL you actually open is still `http://127.0.0.1:53682/...`,
+   since that's resolved on your machine, not inside the container.
+
+   ```bash
+   docker compose run --rm gdunion auth add personal --bind 0.0.0.0
+   ```
+
+3. Mount (runs in the foreground; Ctrl+C stops it):
+
+   ```bash
+   docker compose up
+   ```
+
+4. Poke around from another terminal:
+
+   ```bash
+   docker compose exec gdunion sh
+   ls /mnt/gdrive
+   ```
+
+Any other `gdunion` subcommand works the same way, e.g.
+`docker compose run --rm gdunion crypt enable personal` or
+`docker compose run --rm gdunion auth list`.
+
+The FUSE mount only exists inside the container's own mount namespace - it
+isn't visible in your host's file manager or editor, only inside the
+container (step 4 above, or similar). That's enough to try the tool or run
+it as a semi-isolated background service; if you want a mount you can
+browse normally from your host, install natively instead (step 2, above).
 
 ## Encryption
 

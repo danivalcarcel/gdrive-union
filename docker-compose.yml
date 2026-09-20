@@ -1,0 +1,38 @@
+# Try gdunion (or develop/test it) without installing anything on the host
+# beyond Docker. See README's "Try it with Docker" section for the full
+# walkthrough. Quick version:
+#
+#   cp /path/to/client_secret.json ./gdunion-config/
+#   docker compose run --rm gdunion auth add personal --bind 0.0.0.0
+#   docker compose up
+#   docker compose exec gdunion sh   # poke around /mnt/gdrive from in here
+#
+# ${GDUNION_CONFIG_DIR:-./gdunion-config} is a plain host directory (not a
+# named volume), so credentials can be dropped in - or reused - from outside
+# the container with normal file operations, no `docker exec`/`cp -a`
+# needed. Point it at an existing native install's config to skip `auth
+# add` entirely, e.g.:
+#   GDUNION_CONFIG_DIR=$HOME/.config/gdunion docker compose up
+#
+# The FUSE mount only exists inside the container's own mount namespace -
+# it isn't visible in the host's filesystem. That's enough to try the tool
+# or run it as a semi-isolated background service; for a mount you can
+# browse with your normal host file manager/editor, install natively
+# instead (see README's "2. Install").
+services:
+  gdunion:
+    build: .
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    ports:
+      # For `auth add`'s OAuth callback. Matches --port's default (53682);
+      # change both together if you override --port.
+      - "53682:53682"
+    volumes:
+      # OAuth tokens and encryption keys live here; persists across
+      # `up`/`down` since it's a real host directory, not a named volume.
+      - ${GDUNION_CONFIG_DIR:-./gdunion-config}:/root/.config/gdunion
