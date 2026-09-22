@@ -50,6 +50,14 @@ jobs:
           build darwin amd64
           build darwin arm64
 
+      - name: Checksum binaries
+        # install.sh downloads this alongside the binary and refuses to
+        # install unless the download's hash matches an entry here - run
+        # from inside dist/ so the recorded filenames have no "dist/"
+        # prefix, matching what install.sh looks up (plain "gdunion-<os>-
+        # <arch>").
+        run: (cd dist && sha256sum gdunion-* > SHA256SUMS)
+
       - name: Create release and upload binaries
         env:
           GH_TOKEN: ${{ github.token }}
