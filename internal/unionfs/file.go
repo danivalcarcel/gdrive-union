@@ -104,12 +104,20 @@ func (n *FileNode) truncateRemote(ctx context.Context, size int64) error {
 // Open downloads the file to a local cache on first access (or reuses a
 // previous download) and serves reads from there; writes go to that same
 // local copy and are uploaded whole on close. This trades memory/disk for
-// simplicity over streaming HTTP range requests / byte-range patches,
-// matching rclone's vfs-cache-mode=full behavior.
+// simplicity over byte-range patches, matching rclone's vfs-cache-mode=full
+// behavior - except for a large file opened read-only, which streamHandle
+// serves directly from Drive via HTTP Range requests instead (see
+// shouldStream), since downloading the whole thing before serving a single
+// byte stops mattering once "whole thing" means multiple gigabytes.
 func (n *FileNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32, syscall.Errno) {
 	src, mimeType, size := n.snapshot()
 
 	truncating := flags&uint32(os.O_TRUNC) != 0
+	readOnly := flags&syscall.O_ACCMODE == syscall.O_RDONLY
+
+	if !truncating && readOnly && shouldStream(src, mimeType, size) {
+		return &streamHandle{src: src, mimeType: mimeType, size: size}, fuse.FOPEN_DIRECT_IO, 0
+	}
 
 	var path string
 	var err error

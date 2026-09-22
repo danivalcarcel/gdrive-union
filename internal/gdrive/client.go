@@ -188,6 +188,24 @@ func (a *Account) Open(ctx context.Context, id, mimeType string) (io.ReadCloser,
 	return res.Body, nil
 }
 
+// OpenRange returns a reader for just the byte range [start, end] (inclusive)
+// of id's raw content, via an HTTP Range request - Drive replies with 206
+// Partial Content, which the generated client treats like any other 2xx
+// response, so this needs no special-casing beyond setting the header.
+// Callers must not use this for a Google-native export's mimeType: the
+// exported bytes are generated on the fly rather than read from storage, and
+// don't reliably support partial requests the way a stored file's raw bytes
+// do. The caller must Close() the reader.
+func (a *Account) OpenRange(ctx context.Context, id string, start, end int64) (io.ReadCloser, error) {
+	call := a.Service.Files.Get(id).Context(ctx)
+	call.Header().Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	res, err := call.Download()
+	if err != nil {
+		return nil, fmt.Errorf("%s: downloading %s bytes %d-%d: %w", a.Name, id, start, end, err)
+	}
+	return res.Body, nil
+}
+
 // ExportSuffix returns the filename suffix change needed for a Google-native
 // doc (e.g. a Sheet becomes "<name>.xlsx"), or "" if the file downloads as-is.
 func ExportSuffix(mimeType string) string {
