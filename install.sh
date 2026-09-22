@@ -110,9 +110,22 @@ EOF
 
 if [ "$VERSION" = "latest" ]; then
   url="https://github.com/${REPO}/releases/latest/download/${asset}"
+  checksums_url="https://github.com/${REPO}/releases/latest/download/SHA256SUMS"
 else
   url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+  checksums_url="https://github.com/${REPO}/releases/download/${VERSION}/SHA256SUMS"
 fi
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo "Need sha256sum or shasum to verify the download; neither is on PATH." >&2
+    exit 1
+  fi
+}
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -123,6 +136,29 @@ if ! curl -fsSL -o "$tmp/$asset" "$url"; then
   echo "Check that release '$VERSION' exists and has a '$asset' asset." >&2
   exit 1
 fi
+
+echo "Verifying checksum..."
+if ! curl -fsSL -o "$tmp/SHA256SUMS" "$checksums_url"; then
+  echo "Could not download checksums: $checksums_url" >&2
+  echo "Refusing to install an unverified binary. If '$VERSION' predates" >&2
+  echo "published checksums, install a newer release instead." >&2
+  exit 1
+fi
+
+expected="$(awk -v asset="$asset" '$2 == asset { print $1 }' "$tmp/SHA256SUMS")"
+if [ -z "$expected" ]; then
+  echo "No checksum for '$asset' found in SHA256SUMS - refusing to install." >&2
+  exit 1
+fi
+
+actual="$(sha256_of "$tmp/$asset")"
+if [ "$actual" != "$expected" ]; then
+  echo "Checksum mismatch for $asset - the download may be corrupted or tampered with." >&2
+  echo "Expected: $expected" >&2
+  echo "Got:      $actual" >&2
+  exit 1
+fi
+echo "Checksum OK."
 
 chmod +x "$tmp/$asset"
 
