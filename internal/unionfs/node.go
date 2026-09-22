@@ -169,13 +169,35 @@ func (n *DirNode) refresh(ctx context.Context) (map[string]childInfo, error) {
 		return n.children, nil
 	}
 
+	// Each source is an independent Drive API round-trip, so fetch them all
+	// concurrently rather than paying their latencies one after another - a
+	// directory merging N accounts would otherwise take N times as long to
+	// refresh as one backed by a single account. Results are merged
+	// afterwards in n.sources order (unchanged from the sequential version),
+	// since that order is what decides which account keeps a colliding name
+	// (see mergeEntry/disambiguate).
+	type listResult struct {
+		entries []gdrive.Entry
+		err     error
+	}
+	results := make([]listResult, len(n.sources))
+	var wg sync.WaitGroup
+	for i, src := range n.sources {
+		wg.Add(1)
+		go func(i int, src Source) {
+			defer wg.Done()
+			entries, err := src.Account.ListChildren(ctx, src.FileID)
+			results[i] = listResult{entries: entries, err: err}
+		}(i, src)
+	}
+	wg.Wait()
+
 	children := make(map[string]childInfo)
-	for _, src := range n.sources {
-		entries, err := src.Account.ListChildren(ctx, src.FileID)
-		if err != nil {
-			return nil, err
+	for i, src := range n.sources {
+		if results[i].err != nil {
+			return nil, results[i].err
 		}
-		for _, e := range entries {
+		for _, e := range results[i].entries {
 			mergeEntry(children, src.Account, e)
 		}
 	}
